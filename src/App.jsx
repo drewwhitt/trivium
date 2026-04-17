@@ -1,3 +1,7 @@
+import { useState } from "react";
+
+console.log("ENV TEST:", import.meta.env);
+
 import { QUESTION_BANK } from "./questions.js";
  
 const ALL_CATEGORIES = Object.keys(QUESTION_BANK);
