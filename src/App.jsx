@@ -67,22 +67,48 @@ function getDailyQuestions() {
 }
  
 // ─── STORAGE ─────────────────────────────────────────────────────────────────
-const load = async (key, shared = false) => { try { const r = await window.storage.get(key, shared); return r ? JSON.parse(r.value) : null; } catch { return null; } };
-const save = async (key, val, shared = false) => { try { await window.storage.set(key, JSON.stringify(val), shared); } catch {} };
-const loadPlayers = async () => (await load("trivia_players")) || {};
-const savePlayers = async (ps) => save("trivia_players", ps);
-const todayKey = () => new Date().toISOString().slice(0, 10);
-const loadDailyScores = async () => (await load(`daily_${todayKey()}`, true)) || [];
+import { supabase } from './supabase.js'
+
+const loadPlayers = async () => {
+  const { data } = await supabase.from('players').select('*')
+  const map = {}
+  data?.forEach(p => {
+    map[p.username] = {
+      username: p.username, elo: p.elo, assessed: p.assessed,
+      games: p.games, wins: p.wins, dailyStreak: p.daily_streak,
+      lastDaily: p.last_daily, eloHistory: p.elo_history || [],
+      personalBests: p.personal_bests || {}
+    }
+  })
+  return map
+}
+
+const savePlayers = async (ps) => {
+  const rows = Object.values(ps).map(p => ({
+    username: p.username, elo: p.elo, assessed: p.assessed,
+    games: p.games, wins: p.wins, daily_streak: p.dailyStreak,
+    last_daily: p.lastDaily, elo_history: p.eloHistory,
+    personal_bests: p.personalBests
+  }))
+  await supabase.from('players').upsert(rows, { onConflict: 'username' })
+}
+
+const todayKey = () => new Date().toISOString().slice(0, 10)
+
+const loadDailyScores = async () => {
+  const today = todayKey()
+  const { data } = await supabase.from('daily_scores').select('*').eq('play_date', today).order('pct', { ascending: false })
+  return data?.map(s => ({ username: s.username, score: s.score, total: s.total, pct: s.pct })) || []
+}
+
 const saveDailyScore = async (username, score, total) => {
-  const scores = await loadDailyScores();
-  const idx = scores.findIndex(s => s.username === username);
-  const entry = { username, score, total, pct: Math.round(score / total * 100) };
-  if (idx >= 0) scores[idx] = entry; else scores.push(entry);
-  scores.sort((a, b) => b.pct - a.pct);
-  await save(`daily_${todayKey()}`, scores, true);
-};
-const loadFlags = async () => (await load("flagged_questions", true)) || [];
-const saveFlag = async (flag) => { const flags = await loadFlags(); flags.push(flag); await save("flagged_questions", flags, true); };
+  const pct = Math.round(score / total * 100)
+  await supabase.from('daily_scores').upsert({ username, score, total, pct, play_date: todayKey() }, { onConflict: 'username,play_date' })
+}
+
+const saveFlag = async (flag) => {
+  await supabase.from('flagged_questions').insert({ question_id: flag.questionId, question: flag.question, correct_answer: flag.correctAnswer, note: flag.note })
+}
  
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function getRank(elo) {
